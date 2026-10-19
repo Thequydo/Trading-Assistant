@@ -28,10 +28,17 @@ jobs:
           pip install -r scripts/requirements.txt
 
       - name: Chạy cỗ máy tự học KwangTae Cloud
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python scripts/kwangtae_daily_learn.py
 
-      - name: Gửi báo cáo tổng kết 17h tới Telegram anh Thế
+      - name: Gửi báo cáo tổng kết 17h tới Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python scripts/send_daily_17h_report.py
 

@@ -1,24 +1,60 @@
 // api/config.js - Vercel Serverless Function cho Trader Desk Pro
-let inMemoryConfig = {
-  stocks: "VN-INDEX,VIC,VHM,VRE,GEX,VIX,GEE,VGC,IDC,VCB,MBB,TCB,CTG,STB,SSI,VND,HCM,VCI,SHS,HPG,HSG,NKG,DGC,DPM,NVL,PDR,DIG,DXG,KDH,FPT,MWG,FRT,MSN,VNM,ACV,VTP,GMD,HAH,VJC,GAS,PLX,PVD,PVS,POW",
-  owned: "ACV",
-  qty: 1250,
-  avg: 45.899,
-  cash: 500000,
-  holdings: {
-    "ACV": { symbol: "ACV", qty: 1250, avgPrice: 45.899, curPrice: 39.2, name: "TCT Cảng Hàng Không VN" }
-  },
-  transactions: [
-    { id: "GD1001", time: "24/09/2026 09:15", type: "deposit", amount: 500000, desc: "Số dư khởi tạo tài khoản", status: "Thành công" }
-  ],
-  session: "ONLINE",
-  time: ""
-};
+import fs from 'fs';
+import path from 'path';
+
+const API_SECRET = process.env.API_SECRET || '';
+
+function getInitialConfig() {
+  const defaultCfg = {
+    stocks: "VN-INDEX,VIC,VHM,VRE,GEX,VIX,GEE,VGC,IDC,VCB,MBB,TCB,CTG,STB,SSI,VND,HCM,VCI,SHS,HPG,HSG,NKG,DGC,DPM,NVL,PDR,DIG,DXG,KDH,FPT,MWG,FRT,MSN,VNM,ACV,VTP,GMD,HAH,VJC,GAS,PLX,PVD,PVS,POW",
+    owned: "ACV",
+    qty: 1250,
+    avg: 45.899,
+    cash: 500000,
+    holdings: {
+      "ACV": { symbol: "ACV", qty: 1250, avgPrice: 45.899, curPrice: 39.2, name: "TCT Cảng Hàng Không VN" }
+    },
+    transactions: [],
+    session: "ONLINE",
+    time: ""
+  };
+
+  try {
+    const configPath = path.join(process.cwd(), 'portfolio_config.json');
+    if (fs.existsSync(configPath)) {
+      const data = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (data.cash !== undefined) defaultCfg.cash = data.cash;
+      if (data.holdings && Array.isArray(data.holdings)) {
+        defaultCfg.holdings = {};
+        data.holdings.forEach(h => {
+          defaultCfg.holdings[h.symbol] = {
+            symbol: h.symbol,
+            qty: h.qty || 0,
+            avgPrice: h.avg_price || 0,
+            curPrice: h.avg_price || 0,
+            name: h.name || h.symbol
+          };
+        });
+        if (data.holdings.length > 0) {
+          defaultCfg.owned = data.holdings[0].symbol;
+          defaultCfg.qty = data.holdings[0].qty;
+          defaultCfg.avg = data.holdings[0].avg_price;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Lỗi tải portfolio_config:", err.message);
+  }
+
+  return defaultCfg;
+}
+
+let inMemoryConfig = getInitialConfig();
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-secret");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
@@ -26,6 +62,14 @@ export default async function handler(req, res) {
 
   // 1. XỬ LÝ LƯU CẤU HÌNH (POST /save HOẶC POST /api/config)
   if (req.method === "POST") {
+    if (API_SECRET) {
+      const authHeader = req.headers['authorization'] || '';
+      const clientSecret = req.headers['x-api-secret'] || (authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '');
+      if (clientSecret !== API_SECRET) {
+        return res.status(401).json({ error: "Unauthorized: Invalid API secret" });
+      }
+    }
+
     let body = req.body;
     if (typeof body === "string") {
       try {
@@ -46,7 +90,7 @@ export default async function handler(req, res) {
       if (body.transactions) inMemoryConfig.transactions = body.transactions;
     }
 
-    // Nếu có biến môi trường KV / Upstash Redis -> Lưu vào đám mây vĩnh viễn
+    // Nếu có KV / Upstash Redis -> Lưu vào đám mây
     if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
       try {
         await fetch(`${process.env.KV_REST_API_URL}/set/trader_cfg`, {
@@ -59,12 +103,11 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ status: "ok", msg: "Đã lưu thành công lên Vercel Cloud!" });
+    return res.status(200).json({ status: "ok", msg: "Đã lưu cấu hình danh mục thành công!" });
   }
 
   // 2. XỬ LÝ ĐỌC CẤU HÌNH & BẢNG GIÁ REALTIME (GET /api/config)
   if (req.method === "GET") {
-    // Nếu có KV -> Đọc cấu hình từ KV
     if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
       try {
         const kvRes = await fetch(`${process.env.KV_REST_API_URL}/get/trader_cfg`, {
@@ -88,7 +131,8 @@ export default async function handler(req, res) {
       if (inMemoryConfig.stocks.includes("VN-INDEX")) {
         try {
           const idxRes = await fetch("https://bgapidatafeed.vps.com.vn/getlistindexdetail/10", {
-            headers: { "User-Agent": "Mozilla/5.0" }
+            headers: { "User-Agent": "Mozilla/5.0" },
+            signal: AbortSignal.timeout(2000)
           });
           const idxData = await idxRes.json();
           if (idxData && idxData.length > 0) {
@@ -99,14 +143,15 @@ export default async function handler(req, res) {
             items.push({ sym: "VN-INDEX", price: cIdx, chg: chg, ot: ot, vol: idxData[0].vol || 0 });
           }
         } catch (_) {
-          items.push({ sym: "VN-INDEX", price: 1775.09, chg: 0.0, vol: 0 });
+          items.push({ sym: "VN-INDEX", price: 0.0, chg: 0.0, vol: 0 });
         }
       }
 
       // 2. Kéo danh sách cổ phiếu từ VPS
       if (stockList.length > 0) {
         const vpsRes = await fetch(`https://bgapidatafeed.vps.com.vn/getliststockdata/${stockList.join(",")}`, {
-          headers: { "User-Agent": "Mozilla/5.0" }
+          headers: { "User-Agent": "Mozilla/5.0" },
+          signal: AbortSignal.timeout(2500)
         });
         const vpsData = await vpsRes.json();
         for (const s of vpsData) {
@@ -140,7 +185,7 @@ export default async function handler(req, res) {
         }
       }
     } catch (e) {
-      console.error("VPS proxy error:", e);
+      console.error("VPS proxy error:", e.message);
     }
 
     const now = new Date();

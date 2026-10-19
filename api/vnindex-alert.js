@@ -1,11 +1,15 @@
 // api/vnindex-alert.js - Serverless Monitor for VN-INDEX (+/- 15 Points Telegram Alert)
-const BOT_TOKEN = '8909883039:AAFT6ZgMJWKLt5jJOJjAx7zxEKIltTjwOSI';
-const DEFAULT_CHAT_ID = 5951966097;
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const DEFAULT_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
 let lastAlertState = null;
 let lastAlertTimestamp = 0;
 
 async function sendTelegram(chatId, text) {
+  if (!BOT_TOKEN || !chatId) {
+    console.warn("Thiếu BOT_TOKEN hoặc chatId để gửi cảnh báo VN-INDEX");
+    return false;
+  }
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
   try {
     const res = await fetch(url, {
@@ -36,8 +40,12 @@ export default async function handler(req, res) {
   const { test = "false", chatId = DEFAULT_CHAT_ID } = req.query;
   const isTest = test === "true" || test === "1";
 
+  if (!chatId) {
+    return res.status(400).json({ error: "Chưa cấu hình TELEGRAM_CHAT_ID" });
+  }
+
   try {
-    // 1. Kéo dữ liệu chỉ số VN-INDEX thời gian thực từ VPS (mã 10)
+    // 1. Kéo dữ liệu chỉ số VN-INDEX thời gian thực từ VPS
     let curIndex = 0;
     let refIndex = 0;
     let diff = 0;
@@ -46,7 +54,8 @@ export default async function handler(req, res) {
 
     try {
       const vpsRes = await fetch('https://bgapidatafeed.vps.com.vn/getlistindexdetail/10', {
-        headers: { "User-Agent": "Mozilla/5.0" }
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(2000)
       });
       if (vpsRes.ok) {
         const vpsData = await vpsRes.json();
@@ -60,13 +69,15 @@ export default async function handler(req, res) {
         }
       }
     } catch (e) {
-      console.warn("Lỗi kéo VPS index:", e);
+      console.warn("Lỗi kéo VPS index:", e.message);
     }
 
     // Fallback qua Entrade nếu VPS nghẽn
     if (curIndex === 0) {
       const now = Math.floor(Date.now() / 1000);
-      const enRes = await fetch(`https://services.entrade.com.vn/chart-api/v2/ohlcs/index?from=${now - 86400 * 3}&to=${now}&symbol=VNINDEX&resolution=1D`);
+      const enRes = await fetch(`https://services.entrade.com.vn/chart-api/v2/ohlcs/index?from=${now - 86400 * 3}&to=${now}&symbol=VNINDEX&resolution=1D`, {
+        signal: AbortSignal.timeout(2500)
+      });
       if (enRes.ok) {
         const enData = await enRes.json();
         if (enData && enData.c && enData.c.length > 1) {
@@ -87,7 +98,7 @@ export default async function handler(req, res) {
       const nowMs = Date.now();
       const alertType = diff >= 0 ? "UP_15" : "DOWN_15";
 
-      // Kiểm tra cooldown 30 phút nếu không phải test
+      // Cooldown 30 phút nếu không phải test
       const COOLDOWN_MS = 30 * 60 * 1000;
       const canSend = isTest || (lastAlertState !== alertType) || ((nowMs - lastAlertTimestamp) >= COOLDOWN_MS);
 
@@ -95,23 +106,15 @@ export default async function handler(req, res) {
         const isUp = diff >= 0;
         const sign = isUp ? "+" : "";
         const icon = isUp ? "🚀 🟢" : "⚠️ 🔴";
-        const title = isUp ? "VN-INDEX BÙNG NỔ TĂNG TRÊN 15 ĐIỂM!" : "VN-INDEX GIẢM MẠNH TRÊN 15 ĐIỂM!";
+        const title = isUp ? "VN-INDEX BÙNG NỔ TĂNG TRÊN 15 ĐIỂM!" : "VN-INDEX ĐIỀU CHỈNH MẠNH TRÊN 15 ĐIỂM!";
         const advice = isUp
-          ? "Thị trường hưng phấn mạnh! Cơ hội tuyệt vời để chủ động chốt lời từng phần hoặc cơ cấu danh mục giá xanh."
-          : "Áp lực bán dâng cao toàn thị trường! Tuyệt đối không hoảng loạn bán tháo ở đáy, chuẩn bị tiền mặt canh bắt nhịp hồi.";
+          ? "Thị trường hưng phấn mạnh! Cơ hội thuận lợi để chủ động chốt lời từng phần hoặc cơ cấu danh mục sang các mã khỏe."
+          : "Áp lực bán tháo diện rộng! Giữ vững kỷ luật, tuyệt đối không hoảng loạn bán đáy những mã cơ bản tốt, ưu tiên quản trị tiền mặt.";
 
-        const tgMsg = `${icon} <b>[KWANGTAE CẢNH BÁO BIẾN ĐỘNG THỊ TRƯỜNG]</b> ⚡\n\n` +
-          `📊 <b>Chỉ số VN-INDEX:</b> <b>${curIndex.toFixed(2)} điểm</b>\n` +
-          `📈 <b>Mức biến động:</b> <b>${sign}${diff.toFixed(2)} điểm</b> (${sign}${pct.toFixed(2)}%)\n` +
-          `🎯 <b>Tham chiếu đầu phiên:</b> ${refIndex.toFixed(2)} điểm\n` +
-          `⏱ <b>Thời điểm ghi nhận:</b> ${timeStr || new Date().toLocaleTimeString("vi-VN")}\n\n` +
-          `💼 <b>LỜI KHUYÊN CHO ANH THẾ QUANG:</b>\n` +
-          `• <b>Xu hướng:</b> ${advice}\n` +
-          `• <b>Vị thế ACV:</b> Tiếp tục khóa chặt 1,000 cổ cốt lõi cất tủ dài hạn, bán 250 cổ cơ cấu thu tiền mặt quanh 39.4k.\n\n` +
-          `🌐 <i>Theo dõi trực tiếp: https://trader-desk-mbs.vercel.app</i>`;
+        const message = `🏛️ <b>[CẢNH BÁO BIẾN ĐỘNG THỊ TRƯỜNG]</b> ${icon}\n━━━━━━━━━━━━━━━━━━━\n<b>${title}</b>\n\n• <b>Điểm số hiện tại:</b> <b>${curIndex.toFixed(2)} điểm</b>\n• <b>Biến động:</b> <b>${sign}${diff.toFixed(2)} điểm (${sign}${pct.toFixed(2)}%)</b>\n• <b>Thời gian:</b> <i>${timeStr || new Date().toLocaleTimeString('vi-VN')}</i>\n\n💡 <b>Hành động định lượng:</b>\n<i>${advice}</i>\n\n👉 <i>KwangTae Terminal</i>`;
 
-        alertSent = await sendTelegram(chatId, tgMsg);
-        if (alertSent && !isTest) {
+        alertSent = await sendTelegram(chatId, message);
+        if (alertSent) {
           lastAlertState = alertType;
           lastAlertTimestamp = nowMs;
         }
@@ -119,20 +122,15 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({
-      ok: true,
-      vnindex: {
-        current: curIndex,
-        ref: refIndex,
-        diff: parseFloat(diff.toFixed(2)),
-        pct: parseFloat(pct.toFixed(2)),
-        time: timeStr
-      },
-      threshold: THRESHOLD,
-      isTriggered: Math.abs(diff) >= THRESHOLD,
-      alertSent: alertSent,
-      isTest: isTest
+      status: "ok",
+      curIndex,
+      diff,
+      pct,
+      isTriggered,
+      alertSent,
+      isTest
     });
-  } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
   }
 }

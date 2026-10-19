@@ -5,8 +5,8 @@ import urllib.request
 import urllib.parse
 from datetime import datetime
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8909883039:AAFT6ZgMJWKLt5jJOJjAx7zxEKIltTjwOSI")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "5951966097")
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 def get_vnindex():
     """Lấy dữ liệu chỉ số VN-INDEX đóng cửa hôm nay (ưu tiên VPS, dự phòng Entrade)"""
@@ -79,8 +79,7 @@ def load_portfolio_config():
     """Tải cấu hình danh mục đầu tư"""
     config_paths = [
         os.path.join(os.path.dirname(__file__), '..', 'portfolio_config.json'),
-        'portfolio_config.json',
-        r'C:\CODE IDE\vercel-trader-desk\portfolio_config.json'
+        'portfolio_config.json'
     ]
     for p in config_paths:
         if os.path.exists(p):
@@ -90,18 +89,10 @@ def load_portfolio_config():
             except Exception:
                 pass
     
-    # Cấu hình mặc định nếu không thấy file
     return {
-        "investor_name": "Quang Thế (QTheee)",
-        "cash": 500000,
-        "holdings": [
-            {
-                "symbol": "ACV",
-                "name": "TCT Cảng Hàng Không VN",
-                "qty": 1250,
-                "avg_price": 45.899
-            }
-        ]
+        "investor_name": "Nhà đầu tư",
+        "cash": 0,
+        "holdings": []
     }
 
 def format_money(val):
@@ -119,7 +110,8 @@ def generate_daily_report():
 
     # 2. Dữ liệu danh mục
     cfg = load_portfolio_config()
-    cash = float(cfg.get('cash', 500000))
+    investor_name = cfg.get('investor_name', 'Nhà đầu tư')
+    cash = float(cfg.get('cash', 0))
     holdings = cfg.get('holdings', [])
     
     total_stock_value = 0.0
@@ -136,7 +128,6 @@ def generate_daily_report():
         
         quote = get_stock_data(sym)
         cur_p = quote['price']
-        ref_p = quote['ref']
         diff_p = quote['diff']
         pct_p = quote['pct']
         
@@ -153,7 +144,6 @@ def generate_daily_report():
         
         stock_sign = "+" if diff_p >= 0 else ""
         stock_icon = "🟢" if diff_p > 0 else ("🔴" if diff_p < 0 else "🟡")
-        
         pnl_icon = "🚀" if daily_pnl > 0 else ("📉" if daily_pnl < 0 else "➖")
         
         part = (
@@ -165,6 +155,9 @@ def generate_daily_report():
         )
         holdings_msg_parts.append(part)
         time.sleep(0.05)
+
+    if not holdings_msg_parts:
+        holdings_msg_parts.append("• <i>Chưa có cổ phiếu nào được thiết lập trong danh mục.</i>")
 
     # Tổng kết tài khoản
     total_nav = total_stock_value + cash
@@ -179,15 +172,14 @@ def generate_daily_report():
     
     # Lời khuyên định lượng từ KwangTae AI
     if total_daily_pnl > 0:
-        advice_text = "Hôm nay tài khoản của anh Thế hồi phục rất tích cực! Dòng tiền mua chủ động gia tăng. Tiếp tục kiên định chiến lược nắm giữ dài hạn, không mua đuổi hưng phấn."
+        advice_text = "Hôm nay danh mục tăng trưởng tích cực! Dòng tiền mua chủ động gia tăng. Tiếp tục kiên định chiến lược quản trị rủi ro, không mua đuổi vùng hưng phấn."
     elif total_daily_pnl < 0:
-        advice_text = "Thị trường chịu áp lực điều chỉnh chung. Vị thế danh mục an toàn, không sử dụng margin nên anh hoàn toàn yên tâm kê cao gối ngủ, chờ nhịp hồi phục tiếp theo."
+        advice_text = "Thị trường chung điều chỉnh. Vị thế danh mục an toàn, giữ tỷ trọng tiền mặt hợp lý để chủ động đón nhịp cân bằng tiếp theo."
     else:
-        advice_text = "Danh mục hôm nay biến động đi ngang tích lũy cân bằng. Giữ nguyên tỷ trọng chờ dòng tiền kích hoạt nhịp bùng nổ."
+        advice_text = "Danh mục hôm nay biến động tích lũy cân bằng. Giữ nguyên tỷ trọng chờ dòng tiền kích hoạt xu hướng rõ ràng."
 
-    # Lắp ráp tin nhắn hoàn chỉnh
     message = (
-        f"👔 <b>[KWANGTAE BROKER - BÁO CÁO PHIÊN 17:00]</b> 🔔\n"
+        f"👔 <b>[KWANGTAE QUANT - BÁO CÁO PHIÊN 17:00]</b> 🔔\n"
         f"📅 <i>Tổng kết ngày: {today_str}</i>\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
         f"📊 <b>1. BIẾN ĐỘNG THỊ TRƯỜNG CHUNG:</b>\n"
@@ -198,21 +190,25 @@ def generate_daily_report():
         f"💼 <b>2. CỔ PHIẾU TRONG DANH MỤC:</b>\n"
         + "\n\n".join(holdings_msg_parts) + "\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💰 <b>3. HIỆU QUẢ TÀI KHOẢN ANH THẾ:</b>\n"
+        f"💰 <b>3. HIỆU QUẢ TÀI SẢN ({investor_name}):</b>\n"
         f"• <b>LÃI / LỖ HÔM NAY:</b> {daily_icon} <b>{format_money(total_daily_pnl)} ({'+' if daily_nav_pct>=0 else ''}{daily_nav_pct:.2f}%)</b>\n"
         f"• <b>TỔNG LÃI / LỖ DANH MỤC:</b> {overall_icon} <b>{format_money(overall_pnl)} ({'+' if overall_pnl_pct>=0 else ''}{overall_pnl_pct:.2f}%)</b>\n"
         f"• <b>Giá trị cổ phiếu:</b> {total_stock_value:,.0f} đ\n".replace(",", ".") +
         f"• <b>Tiền mặt sẵn có:</b> {cash:,.0f} đ\n".replace(",", ".") +
         f"• 🏆 <b>TỔNG TÀI SẢN (NAV):</b> <b>{total_nav:,.0f} đ</b>\n\n".replace(",", ".") +
         f"━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💡 <b>LỜI KHUYÊN TỪ KWANGTAE AI:</b>\n"
+        f"💡 <b>NHẬN ĐỊNH ĐỊNH LƯỢNG:</b>\n"
         f"<i>{advice_text}</i>\n\n"
-        f"👉 <i>Theo dõi trực tiếp: https://trader-desk-mbs.vercel.app</i>"
+        f"👉 <i>Theo dõi trực tiếp: KwangTae Quant Terminal</i>"
     )
     
     return message
 
 def send_telegram(message):
+    if not BOT_TOKEN or not CHAT_ID:
+        print("⚠️ Chưa cấu hình TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID trong biến môi trường. Bỏ qua gửi tin.")
+        return False
+
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = json.dumps({
         'chat_id': CHAT_ID,

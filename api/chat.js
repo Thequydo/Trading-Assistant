@@ -1,16 +1,33 @@
 import fs from 'fs';
 import path from 'path';
 
-const BOT_TOKEN = '8909883039:AAFT6ZgMJWKLt5jJOJjAx7zxEKIltTjwOSI';
-// Obfuscated to comply with GitHub Push Protection rules
-const GEMINI_KEY = process.env.GEMINI_KEY || Buffer.from('QVEuQWI4Uk42SlFseEhZV3hObFN2dk8yYzhTYVZIUjF3cWd2bFVBc0ktODBEUHRhLWpzQ3c=', 'base64').toString('utf-8');
+const GEMINI_KEY = process.env.GEMINI_KEY || process.env.GEMINI_API_KEY || '';
+
+function loadPortfolioConfig() {
+  const defaultCfg = {
+    investor_name: "Nhà đầu tư",
+    cash: 0,
+    holdings: []
+  };
+
+  try {
+    const configPath = path.join(process.cwd(), 'portfolio_config.json');
+    if (fs.existsSync(configPath)) {
+      const data = fs.readFileSync(configPath, 'utf-8');
+      return { ...defaultCfg, ...JSON.parse(data) };
+    }
+  } catch (err) {
+    console.warn("Lỗi đọc portfolio_config.json:", err.message);
+  }
+  return defaultCfg;
+}
 
 async function fetchLiveQuote(sym) {
   if (!sym) return null;
   try {
     const res = await fetch(`https://bgapidatafeed.vps.com.vn/getliststockdata/${sym}`, {
       headers: { "User-Agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(1200)
+      signal: AbortSignal.timeout(1500)
     });
     if (res.ok) {
       const data = await res.json();
@@ -34,7 +51,7 @@ async function fetchLiveQuote(sym) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -46,7 +63,7 @@ export default async function handler(req, res) {
 
   const { message, symbol, price } = req.body || {};
   const query = (message || '').trim();
-  const currentSym = (symbol || 'ACV').toUpperCase();
+  const currentSym = (symbol || 'VNINDEX').toUpperCase();
 
   if (!query) {
     return res.status(400).json({ error: 'Thiếu nội dung câu hỏi' });
@@ -63,71 +80,81 @@ export default async function handler(req, res) {
 
   // 2. Kéo dữ liệu giá sống
   const quote = await fetchLiveQuote(currentSym);
-  const livePriceStr = quote ? `• Mã ${quote.sym} [${quote.market}]: Giá ${quote.price}k | TC: ${quote.ref}k | Trần: ${quote.ceil}k | Sàn: ${quote.floor}k | Khối lượng: ${quote.vol.toLocaleString()} CP` : `• Mã ${currentSym}: Giá hiện tại khoảng ${price || 39.4}k`;
+  const livePriceStr = quote ? `• Mã ${quote.sym} [${quote.market}]: Giá ${quote.price}k | TC: ${quote.ref}k | Trần: ${quote.ceil}k | Sàn: ${quote.floor}k | Khối lượng: ${quote.vol.toLocaleString()} CP` : `• Mã ${currentSym}: Giá hiện tại tham chiếu ${price || 0}k`;
 
-  // 3. Chuẩn bị system instruction
-  const systemInstruction = `Bạn là KwangTae AI - Chuyên gia Cố vấn Đầu tư & Định lượng Chứng khoán Việt Nam (như một Gemini thu nhỏ trên sàn chứng khoán).
-Khách hàng VIP của bạn là anh Ngô Quang Thế (Red Devil - Fan Manchester United, tài khoản MBS 2512T51). Luôn xưng 'em' hoặc 'KwangTae', gọi 'anh Thế' hoặc 'anh Quang Thế' (TUYỆT ĐỐI KHÔNG GỌI LÀ 'Sếp').
-Bạn trả lời trực tiếp câu hỏi của anh Thế một cách súc tích, thực chiến, số liệu rõ ràng (điểm cắt lỗ, vùng hỗ trợ, kháng cự, tỷ lệ rủi ro, target chốt lời).
+  // 3. Tải cấu hình danh mục động
+  const portfolio = loadPortfolioConfig();
+  const holdingsSummary = portfolio.holdings && portfolio.holdings.length > 0
+    ? portfolio.holdings.map(h => `- ${h.symbol} (${h.name || h.symbol}): ${h.qty?.toLocaleString()} CP, giá vốn ${h.avg_price}k`).join('\n')
+    : "- Danh mục hiện tại chưa ghi nhận mã nắm giữ.";
+  const cashFormatted = (portfolio.cash || 0).toLocaleString('vi-VN');
 
-DỮ LIỆU TÀI SẢN THỰC TẾ CỦA ANH THẾ (RẤT QUAN TRỌNG, TUYỆT ĐỐI KHÔNG ĐƯỢC NHẦM LẪN):
+  // 4. Chuẩn bị system instruction
+  const systemInstruction = `Bạn là KwangTae AI - Chuyên gia Cố vấn Đầu tư & Định lượng Chứng khoán Việt Nam.
+Khách hàng bạn đang tư vấn: ${portfolio.investor_name}.
+Bạn trả lời trực tiếp câu hỏi một cách súc tích, thực chiến, số liệu rõ ràng (điểm cắt lỗ, vùng hỗ trợ, kháng cự, tỷ lệ rủi ro, target chốt lời).
+
+DỮ LIỆU TÀI SẢN THỰC TẾ CỦA KHÁCH HÀNG:
 - Mã đang xem trên màn hình: ${currentSym}
 ${livePriceStr}
-- Cổ phiếu đang nắm giữ: 1,250 CP ACV (vốn 45.899k, hiện tại ~39.4k).
-- TIỀN MẶT THỰC TẾ HIỆN CÓ: CHỈ ĐÚNG 500,000 VNĐ (Năm trăm nghìn đồng), TUYỆT ĐỐI KHÔNG PHẢI 10.3 triệu đồng!
-- LƯU Ý ĐẶC BIỆT VỀ CON SỐ 10.3 TRIỆU: Con số ~10.32 triệu CHỈ LÀ DỰ KIẾN TRÊN GIẤY NẾU anh Thế đặt bán 250 cổ phiếu ACV (thu về ~9.82 triệu) cộng với 500k tiền mặt sẵn có. HIỆN TẠI ANH THẾ CHƯA BÁN, NÊN TIỀN MẶT THỰC CÓ TRONG TÀI KHOẢN CHỈ LÀ 500,000 VNĐ!
-- Khi tư vấn mua bán/vào tiền: Vì tiền mặt anh Thế hiện chỉ có 500,000 VNĐ (chưa đủ mua tối thiểu 1 lô 100 cổ của bất kỳ mã nào), nếu anh Thế muốn mua mã mới, phải nhắc anh Thế bán cơ cấu 250 cổ ACV trước để lấy ~9.82 triệu tiền mặt hoặc nạp thêm tiền!
+- Danh mục nắm giữ:
+${holdingsSummary}
+- Tiền mặt sẵn có: ${cashFormatted} VNĐ.
+- Khi tư vấn mua bán: Chú ý đối chiếu số dư tiền mặt hiện có so với quy mô 1 lô (100 CP) tối thiểu của mã được hỏi.
 
 QUY TẮC PHÂN TÍCH:
-- Nếu hỏi "điểm cắt lỗ", "cắt lỗ": Tính toán điểm cắt lỗ cụ thể (ví dụ dưới đáy hỗ trợ 3-5%, hoặc dưới MA20/MA50).
+- Nếu hỏi "điểm cắt lỗ", "cắt lỗ": Tính toán điểm cắt lỗ kỹ thuật cụ thể (dưới hỗ trợ hoặc MA20, MA50, rủi ro -5% đến -7%).
 - Nếu hỏi "target", "chốt lời": Nêu target 1 (ngắn hạn) và target 2 (trung hạn).
-- Nếu hỏi "nên mua", "vào tiền": Đưa ra tỷ lệ giải ngân thăm dò (20-30%), điều kiện nổ vol / breakout, và nhắc rõ về việc cơ cấu 250 cổ ACV để có tiền mặt.
-- Văn phong: Chuyên nghiệp, nhiệt huyết như một Red Devil, dùng icon sinh động, trả lời bằng tiếng Việt gãy gọn trong 3-5 đoạn.`;
+- Nếu hỏi "nên mua", "vào tiền": Đưa ra tỷ lệ giải ngân thăm dò (20-30%), điều kiện xác nhận nổ vol / breakout.
+- Văn phong: Chuyên nghiệp, nhạy bén thị trường, sử dụng định dạng ngắn gọn trong 3-5 đoạn.`;
 
-  const payload = {
-    contents: [{ role: 'user', parts: [{ text: query }] }],
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-    generationConfig: { temperature: 0.6, maxOutputTokens: 500 }
-  };
+  // 5. Gọi Gemini nếu có key
+  if (GEMINI_KEY) {
+    const payload = {
+      contents: [{ role: 'user', parts: [{ text: query }] }],
+      systemInstruction: { parts: [{ text: systemInstruction }] },
+      generationConfig: { temperature: 0.6, maxOutputTokens: 600 }
+    };
 
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${GEMINI_KEY}`;
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(3000)
-    });
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${GEMINI_KEY}`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(3500)
+      });
 
-    if (resp.ok) {
-      const data = await resp.json();
-      const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (replyText && replyText.trim().length > 0) {
-        return res.status(200).json({ ok: true, reply: replyText.trim(), source: 'gemini' });
+      if (resp.ok) {
+        const data = await resp.json();
+        const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (replyText && replyText.trim().length > 0) {
+          return res.status(200).json({ ok: true, reply: replyText.trim(), source: 'gemini' });
+        }
       }
+    } catch (err) {
+      console.warn("Gemini call error in api/chat:", err.message);
     }
-  } catch (err) {
-    console.warn("Gemini call error in api/chat:", err.message);
   }
 
-  // Fallback định lượng thông minh tức thì
+  // 6. Fallback định lượng thông minh tức thì nếu không có key hoặc timeout
   let fallbackReply = "";
-  const curP = quote ? quote.price : (price || 39.4);
+  const curP = quote ? quote.price : (price || 25.0);
   const qUpper = query.toUpperCase();
 
   if (qUpper.includes("CẮT LỖ") || qUpper.includes("CAT LO") || qUpper.includes("STOP")) {
     const sl = (curP * 0.94).toFixed(quote?.market === 'UPCoM' ? 1 : 2);
-    fallbackReply = `🛡️ <b>ĐIỂM CẮT LỖ KỸ THUẬT CHO MÃ ${currentSym}:</b>\n\n• Giá hiện tại: <b>${curP}k</b>\n• Điểm Stop-loss khuyến nghị: <b>${sl}k</b> (-6.0% từ giá hiện tại, tiệm cận vùng hỗ trợ cứng).\n• <b>Quy tắc kỷ luật:</b> Nếu cổ phiếu đóng phiên thủng ${sl}k kèm thanh khoản lớn, anh Thế nên dứt khoát hạ 50% tỷ trọng để bảo toàn vốn trước khi tìm điểm cân bằng mới!`;
+    fallbackReply = `🛡️ <b>ĐIỂM CẮT LỖ KỸ THUẬT CHO MÃ ${currentSym}:</b>\n\n• Giá hiện tại: <b>${curP}k</b>\n• Điểm Stop-loss khuyến nghị: <b>${sl}k</b> (-6.0% từ giá hiện tại, tiệm cận vùng hỗ trợ cứng).\n• <b>Kỷ luật giao dịch:</b> Nếu đóng phiên xuyên thủng ${sl}k kèm thanh khoản đột biến, nên chủ động hạ tối thiểu 50% vị thế để bảo toàn vốn!`;
   } else if (qUpper.includes("CHỐT LỜI") || qUpper.includes("TARGET") || qUpper.includes("MỤC TIÊU")) {
     const t1 = (curP * 1.08).toFixed(quote?.market === 'UPCoM' ? 1 : 2);
     const t2 = (curP * 1.15).toFixed(quote?.market === 'UPCoM' ? 1 : 2);
-    fallbackReply = `🎯 <b>MỤC TIÊU CHỐT LỜI (TARGET) MÃ ${currentSym}:</b>\n\n• <b>Target 1 (Ngắn hạn):</b> <b>${t1}k (+8.0%)</b> - Vùng cản kỹ thuật MA50, chốt lời chủ động 30% hàng.\n• <b>Target 2 (Kỳ vọng sóng):</b> <b>${t2}k (+15.0%)</b> - Đỉnh cũ ngắn hạn, hiện thực hóa lợi nhuận khi dòng tiền suy yếu.`;
+    fallbackReply = `🎯 <b>MỤC TIÊU CHỐT LỜI (TARGET) CHO MÃ ${currentSym}:</b>\n\n• <b>Target 1 (Ngắn hạn):</b> <b>${t1}k (+8.0%)</b> - Vùng cản MA20/MA50, chốt lời chủ động 30-50% vị thế.\n• <b>Target 2 (Kỳ vọng sóng):</b> <b>${t2}k (+15.0%)</b> - Đỉnh cũ ngắn hạn, hiện thực hóa toàn bộ lợi nhuận khi đà tăng suy yếu.`;
   } else if (qUpper.includes("HỖ TRỢ") || qUpper.includes("KHÁNG CỰ")) {
-    const sup = (curP * 0.96).toFixed(quote?.market === 'UPCoM' ? 1 : 2);
-    const res = (curP * 1.06).toFixed(quote?.market === 'UPCoM' ? 1 : 2);
-    fallbackReply = `📊 <b>VÙNG HỖ TRỢ & KHÁNG CỰ MÃ ${currentSym}:</b>\n\n• <b>Hỗ trợ 1 (Gần nhất):</b> <b>${sup}k</b> (Nền tích lũy ngắn hạn)\n• <b>Hỗ trợ 2 (Cứng):</b> <b>${(curP * 0.92).toFixed(1)}k</b> (Đáy trung hạn)\n• <b>Kháng cự 1:</b> <b>${res}k</b> (Đường MA20/MA50 đè xuống)\n• <b>Kháng cự 2:</b> <b>${(curP * 1.12).toFixed(1)}k</b> (Vùng phân phối trước đó)`;
+    const sup = (curP * 0.95).toFixed(quote?.market === 'UPCoM' ? 1 : 2);
+    const resP = (curP * 1.06).toFixed(quote?.market === 'UPCoM' ? 1 : 2);
+    fallbackReply = `📊 <b>VÙNG HỖ TRỢ & KHÁNG CỰ MÃ ${currentSym}:</b>\n\n• <b>Hỗ trợ gần nhất:</b> <b>${sup}k</b> (Đáy tích lũy gần nhất)\n• <b>Hỗ trợ trung hạn:</b> <b>${(curP * 0.91).toFixed(1)}k</b>\n• <b>Kháng cự ngắn:</b> <b>${resP}k</b> (Đường trung bình động)\n• <b>Kháng cự mạnh:</b> <b>${(curP * 1.12).toFixed(1)}k</b>`;
   } else {
-    fallbackReply = `⚡ <b>NHẬN ĐỊNH NHANH CHO ANH THẾ QUANG VỀ MÃ ${currentSym}:</b>\n\n• <b>Xu hướng:</b> ${currentSym} đang vận động tích lũy chặt chẽ quanh mức <b>${curP}k</b> với thanh khoản cạn kiệt, cho thấy áp lực bán hoảng loạn đã qua đi.\n• <b>Hành động:</b> Duy trì vị thế quan sát. Nếu muốn gia tăng, chỉ nên giải ngân thăm dò tối đa <b>20-30% tiền mặt</b> khi có cây nến xác nhận dòng tiền lớn nhập cuộc!`;
+    fallbackReply = `⚡ <b>NHẬN ĐỊNH ĐỊNH LƯỢNG CHO MÃ ${currentSym}:</b>\n\n• <b>Vận động giá:</b> ${currentSym} đang tích lũy quanh vùng <b>${curP}k</b>.\n• <b>Chiến lược:</b> Giữ vị thế theo dõi chặt chẽ. Chỉ mở vị thế mua mới với tỷ trọng thăm dò 20-30% khi xuất hiện thanh khoản bùng nổ vượt nền tích lũy!`;
   }
 
   return res.status(200).json({ ok: true, reply: fallbackReply, source: 'quant_fallback' });

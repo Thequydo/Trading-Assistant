@@ -38,6 +38,31 @@
       --font-mono: 'JetBrains Mono', monospace;
     }
 
+    /* THEME: INSTITUTIONAL QUANT DESK (BLOOMBERG DARK) */
+    body.theme-institutional {
+      --bg-dark: #080d1a !important;
+      --card-bg: rgba(14, 22, 40, 0.92) !important;
+      --card-border: rgba(56, 189, 248, 0.25) !important;
+      --card-hover-border: rgba(6, 182, 212, 0.6) !important;
+      --mu-red: #0284c7 !important;
+      --mu-red-glow: rgba(2, 132, 199, 0.45) !important;
+      --mu-red-dark: #0369a1 !important;
+      --mu-gold: #38bdf8 !important;
+      --mu-gold-glow: rgba(56, 189, 248, 0.35) !important;
+      background-color: #080d1a !important;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(0, 82, 204, 0.2) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.12) 0px, transparent 50%),
+        radial-gradient(at 50% 50%, rgba(15, 23, 42, 0.6) 0px, transparent 70%) !important;
+    }
+    body.theme-institutional .mu-full-flank-left,
+    body.theme-institutional .mu-full-flank-right {
+      display: none !important;
+    }
+    body.theme-institutional .header::before {
+      background: linear-gradient(90deg, #0284c7, #38bdf8, #0284c7) !important;
+    }
+
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body {
       font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
@@ -1343,10 +1368,10 @@
           <img src="/images/mu_crest.svg" alt="MU" class="brand-crest">
         </div>
         <div>
-          <div class="brand-title">
-            SINH VIÊN ĐÁNH CHỨNG • MAN UTD EDITION <span style="color:#fbe122;">🔱</span>
+          <div class="brand-title" id="terminalBrandTitle">
+            SINH VIÊN ĐÁNH CHỨNG • MAN UTD EDITION <span style="color:#fbe122;" id="brandIcon">🔱</span>
           </div>
-          <div class="brand-sub">TÀI KHOẢN: NGÔ QUANG THẾ • MBS 2512T51 <span style="font-size:10px; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); border-radius:4px; padding:1px 5px; margin-left:4px; font-weight:800;" title="Đã kích hoạt bảo mật mã PIN cho giao dịch Nạp/Rút và Đặt lệnh">🔒 ĐÃ BẬT BẢO MẬT PIN</span></div>
+          <div class="brand-sub" id="terminalBrandSub">TÀI KHOẢN: <span id="brandAccountLabel">VIP TRADER</span> <span style="font-size:10px; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); border-radius:4px; padding:1px 5px; margin-left:4px; font-weight:800;" title="Đã kích hoạt bảo mật mã PIN cho giao dịch Nạp/Rút và Đặt lệnh">🔒 ĐÃ BẬT BẢO MẬT PIN</span></div>
         </div>
       </div>
 
@@ -1370,6 +1395,9 @@
           </div>
         </div>
 
+        <button class="header-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Chuyển đổi giao diện Fan MU / Bloomberg Pro Dark">
+          <span>🎨</span> <span id="themeToggleText">Theme: MU</span>
+        </button>
         <button class="header-btn" onclick="openTradeJournalModal()">
           <span>📓</span> Trade Journal
         </button>
@@ -1389,7 +1417,7 @@
           <div class="card-title-icon">
             <span>💼</span> Quản Lý Tài Sản & Danh Mục Đầu Tư
           </div>
-          <span class="client-badge"><span style="color:#fbe122;">🔱</span> VIP: Anh Quang Thế <span style="font-size:9.5px; color:#34d399; margin-left:4px;" title="Tài khoản được bảo vệ bằng mã PIN bảo mật cá nhân">🔒 ĐÃ BẬT BẢO MẬT</span></span>
+          <span class="client-badge"><span id="clientBadgeIcon" style="color:#fbe122;">🔱</span> <span id="clientBadgeName">VIP: Anh Quang Thế</span> <span style="font-size:9.5px; color:#34d399; margin-left:4px;" title="Tài khoản được bảo vệ bằng mã PIN bảo mật cá nhân">🔒 ĐÃ BẬT BẢO MẬT</span></span>
         </div>
 
         <div class="stats-row">
@@ -1439,7 +1467,7 @@
             <div class="holdings-pnl-title">
               <span>💼</span> DANH MỤC CỔ PHIẾU SỞ HỮU & LÃI LỖ (PORTFOLIO P&L)
             </div>
-            <span class="client-badge" style="font-size:9.5px; padding:2px 6px;">MBS: 2512T51</span>
+            <span class="client-badge" id="accountBadgeMBS" style="font-size:9.5px; padding:2px 6px;">MBS: 2512T51</span>
           </div>
 
           <div style="overflow-x:auto;">
@@ -1722,14 +1750,14 @@
 
     <!-- FOOTER -->
     <footer class="footer">
-      <strong>KwangTae Institutional Quantitative Engine v2.0 • Manchester United Fan Edition</strong><br>
-      Tài khoản: Ngô Quang Thế (2512T51) • Đồng bộ hóa trực tuyến 24/7 trên Vercel Cloud Serverless<br>
-      <span class="footer-glory">United Till I Die 🔱 • Glory Glory Man United!</span>
+      <strong>KwangTae Institutional Quantitative Engine v2.1 • Multi-Theme Trading Terminal</strong><br>
+      <span id="footerAccountInfo">Tài khoản: Ngô Quang Thế (2512T51)</span> • Đồng bộ hóa trực tuyến 24/7 trên Vercel Cloud Serverless<br>
+      <span class="footer-glory">KwangTae Quant • Disciplined Quantitative Trading</span>
     </footer>
 
   </div>
 
-  <!-- MODAL 1: NẠP TIỀN ĐỊNH DANH (QR CHUẨN CỦA ANH THẾ) -->
+  <!-- MODAL 1: NẠP TIỀN ĐỊNH DANH -->
   <div class="modal-overlay" id="depositModal">
     <div class="modal-card">
       <div class="modal-header">
@@ -1743,9 +1771,9 @@
         </div>
 
         <div style="background:rgba(10,14,26,0.85); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px 12px; font-size:12px; line-height:1.5;">
-          <div style="display:flex; justify-content:space-between;"><span>Chủ tài khoản:</span> <strong>NGÔ QUANG THẾ</strong></div>
-          <div style="display:flex; justify-content:space-between;"><span>Số tài khoản:</span> <strong style="color:var(--accent-cyan)">MBS2512T51</strong></div>
-          <div style="display:flex; justify-content:space-between;"><span>Ngân hàng:</span> <strong>MB (Quân Đội)</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Chủ tài khoản:</span> <strong id="depositAccountOwner">NGÔ QUANG THẾ</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Số tài khoản:</span> <strong id="depositAccountNumber" style="color:var(--accent-cyan)">MBS2512T51</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span>Ngân hàng:</span> <strong id="depositBankName">MB (Quân Đội)</strong></div>
         </div>
 
         <div class="form-group">
@@ -4019,6 +4047,67 @@
       } else {
         prompt('Sao chép cấu hình JSON danh mục:', jsonStr);
       }
+    }
+
+    // ==========================================
+    // THEME SWITCHER & DYNAMIC CONFIG SYNC
+    // ==========================================
+    function initTheme() {
+      const savedTheme = localStorage.getItem('terminal_theme') || 'mu';
+      applyTheme(savedTheme);
+    }
+
+    function toggleTheme() {
+      const isInstitutional = document.body.classList.contains('theme-institutional');
+      const newTheme = isInstitutional ? 'mu' : 'institutional';
+      applyTheme(newTheme);
+      localStorage.setItem('terminal_theme', newTheme);
+      if (typeof showToast === 'function') {
+        showToast(newTheme === 'institutional' ? '🏛️ Đã chuyển sang giao diện Pro Dark' : '🔱 Đã chuyển sang giao diện Fan MU');
+      }
+    }
+
+    function applyTheme(theme) {
+      const btn = document.getElementById('themeToggleText');
+      const brandTitle = document.getElementById('terminalBrandTitle');
+      const brandIcon = document.getElementById('brandIcon');
+      if (theme === 'institutional') {
+        document.body.classList.add('theme-institutional');
+        if (btn) btn.innerHTML = 'Theme: Pro Dark 🏛️';
+        if (brandTitle) brandTitle.innerHTML = 'KWANGTAE QUANT TERMINAL • PRO DESK';
+        if (brandIcon) brandIcon.innerHTML = '📊';
+      } else {
+        document.body.classList.remove('theme-institutional');
+        if (btn) btn.innerHTML = 'Theme: MU Red 🔱';
+        if (brandTitle) brandTitle.innerHTML = 'SINH VIÊN ĐÁNH CHỨNG • MAN UTD EDITION';
+        if (brandIcon) brandIcon.innerHTML = '🔱';
+      }
+    }
+
+    async function syncServerConfig() {
+      try {
+        const secret = localStorage.getItem('terminal_api_secret') || '';
+        const headers = secret ? { 'x-api-secret': secret } : {};
+        const res = await fetch('/api/config', { headers });
+        if (res.ok) {
+          const cfg = await res.json();
+          if (cfg && cfg.investor_name) {
+            const bName = document.getElementById('clientBadgeName');
+            if (bName) bName.innerText = 'VIP: ' + cfg.investor_name;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Tự động khởi tạo theme khi trang sẵn sàng
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        initTheme();
+        syncServerConfig();
+      });
+    } else {
+      initTheme();
+      syncServerConfig();
     }
   </script>
 </body>

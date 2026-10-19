@@ -1,11 +1,23 @@
 {
   "name": "kwangtae-quant-terminal",
-  "version": "2.0.0",
-  "description": "KwangTae Institutional Quantitative AI Broker & Asset Management Portal",
+  "version": "2.1.0",
+  "description": "Enterprise Quantitative Trading Terminal & 24/7 AI Broker for Vietnam Stock Market",
   "scripts": {
-    "start": "vercel dev"
+    "dev": "vercel dev",
+    "start": "vercel dev",
+    "build": "node -e \"console.log('Build OK')\"",
+    "sync-public": "node -e \"const fs = require('fs'); fs.copyFileSync('index.html', 'public/index.html'); console.log('Synced index.html to public/index.html');\""
   },
-  "keywords": ["kwangtae", "quant", "stock-market", "mbs", "vietnam", "gemini-ai", "mlops"],
-  "author": "KwangTae Quant",
+  "keywords": [
+    "trading",
+    "quant",
+    "vietnam-stock",
+    "vnindex",
+    "gemini-ai",
+    "mlops",
+    "lightweight-charts",
+    "telegram-bot"
+  ],
+  "author": "Thequydo",
   "license": "MIT"
 }

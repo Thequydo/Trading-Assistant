@@ -49,8 +49,10 @@ def load_entrade_data(symbol, is_index=False, days=850):
             data = json.loads(resp.read().decode())
             if not data.get('t') or len(data['t']) == 0:
                 return None
+            dt_series = pd.to_datetime(data['t'], unit='s')
             df = pd.DataFrame({
-                'time': pd.to_datetime(data['t'], unit='s'),
+                'time': dt_series,
+                'date': dt_series.dt.date,
                 'open': data['o'],
                 'high': data['h'],
                 'low': data['l'],
@@ -58,7 +60,8 @@ def load_entrade_data(symbol, is_index=False, days=850):
                 'volume': data['v']
             })
             df['symbol'] = symbol
-            return df.sort_values('time').drop_duplicates('time').reset_index(drop=True)
+            # Khử trùng lặp theo ngày để đảm bảo tính liên tục
+            return df.sort_values('date').drop_duplicates('date').reset_index(drop=True)
     except Exception as e:
         print(f"⚠️ Lỗi tải {symbol}: {e}")
         return None
@@ -78,22 +81,23 @@ df_vn['vn_rsi'] = 100 - (100 / (1 + (gain_vn / (loss_vn + 1e-9))))
 df_vn['market_regime'] = np.where((df_vn['close'] > df_vn['vn_ema50']) & (df_vn['vn_ema20'] > df_vn['vn_ema50']), 1.0, 0.0)
 df_vn['vn_ret_1d'] = df_vn['close'].pct_change(1)
 df_vn['vn_ret_5d'] = df_vn['close'].pct_change(5)
-vn_features = df_vn[['time', 'market_regime', 'vn_rsi', 'vn_ret_1d', 'vn_ret_5d']]
+vn_features = df_vn[['date', 'market_regime', 'vn_rsi', 'vn_ret_1d', 'vn_ret_5d']]
 
-# Tải 37 cổ phiếu
+# Tải danh sách cổ phiếu trong Watchlist
 stock_dfs = []
 for s in WATCHLIST:
     d = load_entrade_data(s, is_index=False)
-    if d is not None and len(d) > 100:
+    if d is not None and len(d) > 80:
         stock_dfs.append(d)
     time.sleep(0.02)
 
+print(f"  • Đã tải thành công: {len(stock_dfs)}/{len(WATCHLIST)} cổ phiếu.")
 raw_data = pd.concat(stock_dfs, ignore_index=True)
 
 # Tính toán đặc trưng định lượng
 processed = []
 for sym, group in raw_data.groupby('symbol'):
-    df = group.copy().sort_values('time').reset_index(drop=True)
+    df = group.copy().sort_values('date').reset_index(drop=True)
     df['ema10'] = df['close'].ewm(span=10, adjust=False).mean()
     df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
@@ -118,7 +122,8 @@ for sym, group in raw_data.groupby('symbol'):
     df['atr'] = tr.rolling(14).mean()
     df['norm_atr'] = df['atr'] / df['close']
     
-    df = pd.merge(df, vn_features, on='time', how='inner')
+    # Merge theo 'date' để không bị rớt mã khi lệch giờ giữa các sàn (HOSE, HNX, UPCoM)
+    df = pd.merge(df, vn_features, on='date', how='inner')
     df = df.dropna().reset_index(drop=True)
     processed.append(df)
 
@@ -127,53 +132,58 @@ dataset = pd.concat(processed, ignore_index=True)
 # Tính độ rộng thị trường (Market Breadth) và Vibe Index
 dataset['above_ema20'] = (dataset['close'] > dataset['ema20']).astype(float)
 dataset['is_panic'] = (dataset['rsi'] < 30).astype(float)
-breadth = dataset.groupby('time').agg(
+breadth = dataset.groupby('date').agg(
     market_breadth=('above_ema20', 'mean'),
-    avg_rsi_37=('rsi', 'mean'),
+    avg_rsi_all=('rsi', 'mean'),
     panic_ratio=('is_panic', 'mean')
 ).reset_index()
 
 breadth['vibe_score'] = (
     breadth['market_breadth'] * 50 + 
-    (breadth['avg_rsi_37'] / 100.0) * 30 + 
+    (breadth['avg_rsi_all'] / 100.0) * 30 + 
     (1.0 - breadth['panic_ratio']) * 20
 ).clip(0, 100)
 
-dataset = pd.merge(dataset, breadth, on='time', how='inner')
+dataset = pd.merge(dataset, breadth, on='date', how='inner')
 
-# Gán nhãn T+2.5 có trừ 0.6% phí
-TRANSACTION_COST = 0.006 
-TARGET_NET_PROFIT = 0.030
-MAX_NET_DRAWDOWN  = -0.035
+# =============================================================================
+# GÁN NHÃN ĐỊNH LƯỢNG CHU KỲ T+2.5 THỰC TẾ VIỆT NAM (CÓ TRỪ PHÍ)
+# Mua tại T+1 Open, hàng khả dụng bán vào chiều T+2 và phiên T+3, T+4
+# =============================================================================
+TRANSACTION_COST = 0.005  # 0.5% phí giao dịch + thuế 2 chiều
+TARGET_NET_PROFIT = 0.030 # Lợi nhuận kỳ vọng tối thiểu +3.0%
+MAX_NET_DRAWDOWN  = -0.040 # Chấp nhận sụt giảm tối đa -4.0%
 
 labeled = []
 for sym, group in dataset.groupby('symbol'):
-    df = group.copy().sort_values('time').reset_index(drop=True)
+    df = group.copy().sort_values('date').reset_index(drop=True)
     entry_p = df['open'].shift(-1)
-    max_p = np.maximum(df['high'].shift(-2), df['high'].shift(-3))
-    min_p = np.minimum(df['low'].shift(-2), df['low'].shift(-3))
     
-    max_ret = ((max_p - entry_p) / (entry_p + 1e-9)) - TRANSACTION_COST
-    min_ret = ((min_p - entry_p) / (entry_p + 1e-9)) - TRANSACTION_COST
+    # Cửa sổ bán thực tế: Chiều T+2 (close T+2) và trọn vẹn T+3, T+4
+    exit_max = np.maximum(df['close'].shift(-2), np.maximum(df['high'].shift(-3), df['high'].shift(-4)))
+    exit_min = np.minimum(df['close'].shift(-2), np.minimum(df['low'].shift(-3), df['low'].shift(-4)))
+    
+    max_ret = ((exit_max - entry_p) / (entry_p + 1e-9)) - TRANSACTION_COST
+    min_ret = ((exit_min - entry_p) / (entry_p + 1e-9)) - TRANSACTION_COST
     
     df['target'] = np.where((max_ret >= TARGET_NET_PROFIT) & (min_ret > MAX_NET_DRAWDOWN), 1, 0)
-    labeled.append(df.iloc[:-3])
+    labeled.append(df.iloc[:-4])
 
-full_df = pd.concat(labeled, ignore_index=True).sort_values('time').reset_index(drop=True)
+full_df = pd.concat(labeled, ignore_index=True).sort_values('date').reset_index(drop=True)
 
 FEATURES = [
     'rsi', 'vol_surge', 'dist_ema20', 'dist_ema50', 
     'candle_spread', 'ret_1d', 'ret_3d', 'ret_5d', 'norm_atr',
     'market_regime', 'vn_rsi', 'vn_ret_1d', 'vn_ret_5d',
-    'market_breadth', 'avg_rsi_37', 'vibe_score'
+    'market_breadth', 'avg_rsi_all', 'vibe_score'
 ]
 
 # =============================================================================
-# TRỤ CỘT 5: GIÁM SÁT ĐỘ LỆCH VÀ BẢO VỆ THIÊN NGA ĐEN (BLACK SWAN CIRCUIT BREAKER)
+# TRỤ CỘT 5: GIÁM SÁT RỦI RO & BẢO VỆ THIÊN NGA ĐEN (BLACK SWAN CIRCUIT BREAKER)
 # =============================================================================
 print("\n[BƯỚC 2/5 - GIÁM SÁT RỦI RO & THIÊN NGA ĐEN]")
-latest_t = dataset['time'].max()
-today_sub = dataset[dataset['time'] == latest_t]
+latest_date = dataset['date'].max()
+today_sub = dataset[dataset['date'] == latest_date]
 cur_vibe = float(today_sub['vibe_score'].iloc[0])
 cur_breadth = float(today_sub['market_breadth'].iloc[0]) * 100
 latest_vn_drop = float(today_sub['vn_ret_1d'].iloc[0]) * 100
@@ -182,83 +192,79 @@ print(f"  • VN-INDEX phiên mới nhất : {latest_vn_drop:+.2f}%")
 print(f"  • Market Vibe Index       : {cur_vibe:.1f}/100")
 print(f"  • Độ rộng dòng tiền MA20  : {cur_breadth:.1f}%")
 
-# Kích hoạt Cầu Dao Ngắt Khẩn Cấp (Circuit Breaker) nếu thị trường sập sốc
+# Kích hoạt Cầu Dao Ngắt Khẩn Cấp (Circuit Breaker) nếu thị trường hoảng loạn cực độ
 CIRCUIT_BREAKER_ACTIVE = False
 if latest_vn_drop <= -2.5 or cur_breadth < 12.0:
     CIRCUIT_BREAKER_ACTIVE = True
     print("🚨 [CẢNH BÁO THIÊN NGA ĐEN] Thị trường sụp đổ sốc hoặc phân hóa gãy đổ cực nặng!")
-    print("🛡️ Cầu dao bảo vệ tự động KÍCH HOẠT: Ép toàn bộ tỷ trọng giải ngân về 0% (Cash is King)!")
+    print("🛡️ Cầu dao bảo vệ tự động KÍCH HOẠT: Toàn bộ tỷ trọng giải ngân chuyển về 0% (Cash is King)!")
 
 # =============================================================================
 # TRỤ CỘT 2: CỬA SỔ TRƯỢT (SLIDING WINDOW) & TỰ HỌC TIẾN BƯỚC
 # =============================================================================
 print("\n[BƯỚC 3/5 - CỬA SỔ TRƯỢT (SLIDING WINDOW)]")
-# Giữ khung thời gian cố định 700 ngày gần nhất (loại bỏ dữ liệu lỗi thời ở đầu mút quá khứ)
 SLIDING_WINDOW_DAYS = 700
-unique_dates = sorted(full_df['time'].unique())
+unique_dates = sorted(full_df['date'].unique())
 if len(unique_dates) > SLIDING_WINDOW_DAYS:
     cutoff_date = unique_dates[-SLIDING_WINDOW_DAYS]
-    window_df = full_df[full_df['time'] >= cutoff_date].copy().reset_index(drop=True)
+    window_df = full_df[full_df['date'] >= cutoff_date].copy().reset_index(drop=True)
 else:
     window_df = full_df.copy()
 
-print(f"  • Khung cửa sổ trượt: {len(window_df):,} phiên nến gần nhất (từ {window_df['time'].min().strftime('%d/%m/%Y')} -> {window_df['time'].max().strftime('%d/%m/%Y')})")
+print(f"  • Khung cửa sổ trượt: {len(window_df):,} mẫu nến (từ {window_df['date'].min()} -> {window_df['date'].max()})")
 
 # =============================================================================
-# TRỤ CỘT 3: KIỂM ĐỊNH TRƯỚC KHI CHỐT (SHADOW VALIDATION GATEKEEPER)
+# TRỤ CỘT 3: KIỂM ĐỊNH TRƯỚC KHI TRIỂN KHAI (VALIDATION GATEKEEPER)
 # =============================================================================
-print("\n[BƯỚC 4/5 - KIỂM ĐỊNH TRƯỚC KHI CẤP PHÉP TRIỂN KHAI (VALIDATION GATE)]")
-# Tách tập kiểm định ẩn (Hold-out Validation) là 30 phiên giao dịch gần nhất
-split_date = unique_dates[-30]
-train_part = window_df[window_df['time'] < split_date]
-val_part   = window_df[window_df['time'] >= split_date]
+print("\n[BƯỚC 4/5 - KIỂM ĐỊNH TRƯỚC KHI CẤP PHÉP TRIỂN KHAI]")
+# Tách tập kiểm định 35 phiên gần nhất
+split_date = unique_dates[-35]
+train_part = window_df[window_df['date'] < split_date]
+val_part   = window_df[window_df['date'] >= split_date]
 
 X_train, y_train = train_part[FEATURES], train_part['target']
 X_val, y_val     = val_part[FEATURES], val_part['target']
 
-# Huấn luyện mô hình ứng viên (Candidate Model)
 candidate_model = lgb.LGBMClassifier(
-    n_estimators=240, learning_rate=0.03, max_depth=5,
-    num_leaves=24, min_child_samples=50, subsample=0.8,
+    n_estimators=180, learning_rate=0.03, max_depth=4,
+    num_leaves=16, min_child_samples=40, subsample=0.8,
     colsample_bytree=0.8, random_state=42, verbose=-1
 )
 candidate_model.fit(X_train, y_train)
 
-# Đánh giá sai số & năng lực phân biệt trên tập kiểm định ẩn
 val_preds = candidate_model.predict_proba(X_val)[:, 1]
-val_auc = roc_auc_score(y_val, val_preds)
-val_loss = log_loss(y_val, val_preds)
+val_auc = float(roc_auc_score(y_val, val_preds))
+val_loss = float(log_loss(y_val, val_preds))
 
-print(f"  • Năng lực phân biệt kiểm định (Validation ROC-AUC): {val_auc:.3f}")
-print(f"  • Sai số kiểm định (Validation Log-Loss)          : {val_loss:.3f}")
+print(f"  • Năng lực phân biệt kiểm định (ROC-AUC): {val_auc:.3f}")
+print(f"  • Sai số kiểm định (Log-Loss)          : {val_loss:.3f}")
 
-# Cổng kiểm định: Nếu AUC >= 0.58 (có lợi thế thống kê tốt) -> CẤP PHÉP TRIỂN KHAI
 MODEL_APPROVED = False
 if val_auc >= 0.58:
     MODEL_APPROVED = True
-    print("✅ [CẤP PHÉP THÀNH CÔNG] Mô hình ứng viên đạt chuẩn chất lượng quỹ, phê duyệt đưa vào sản xuất!")
-    # Huấn luyện toàn phần trên toàn bộ cửa sổ trượt
+    print("✅ [CẤP PHÉP THÀNH CÔNG] Mô hình ứng viên đạt chuẩn chất lượng định lượng, đưa vào sản xuất!")
     prod_model = lgb.LGBMClassifier(
-        n_estimators=240, learning_rate=0.03, max_depth=5,
-        num_leaves=24, min_child_samples=50, subsample=0.8,
+        n_estimators=180, learning_rate=0.03, max_depth=4,
+        num_leaves=16, min_child_samples=40, subsample=0.8,
         colsample_bytree=0.8, random_state=42, verbose=-1
     )
     prod_model.fit(window_df[FEATURES], window_df['target'])
 else:
-    print("⚠️ [CẢNH BÁO SUY GIẢM] Sai số kiểm định tăng cao, KÍCH HOẠT HOÀN TÁC (ROLLBACK) về mô hình an toàn!")
-    prod_model = candidate_model # Dùng mô hình baseline an toàn
+    print("⚠️ [CẢNH BÁO SUY GIẢM] AUC dưới ngưỡng 0.58, kích hoạt mô hình bảo toàn an toàn!")
+    prod_model = candidate_model
 
 # =============================================================================
-# TRỤ CỘT 4: SINH TÍN HIỆU GIAO DỊCH & PHÂN BỔ VỐN THỰC CHIẾN
+# TRỤ CỘT 4: SINH TÍN HIỆU GIAO DỊCH & QUẢN TRỊ RỦI RO ĐỘNG (ATR RISK BUDGET)
 # =============================================================================
-print("\n[BƯỚC 5/5 - XUẤT MA TRẬN TÍN HIỆU & PHÂN BỔ VỐN CHO PHIÊN SÁNG MAI]")
+print("\n[BƯỚC 5/5 - XUẤT MA TRẬN TÍN HIỆU & PHÂN BỔ TỶ TRỌNG]")
 
 vibe_status = "🟢 HƯNG PHẤN (FOMO)" if cur_vibe >= 65 else ("🟡 THẬN TRỌNG / TÍCH LŨY" if cur_vibe >= 40 else "🔴 SỢ HÃI / RỦI RO")
 
 radar_list = []
 for sym in WATCHLIST:
     sub = dataset[dataset['symbol'] == sym]
-    if len(sub) == 0: continue
+    if len(sub) == 0: 
+        continue
     last_r = sub.iloc[-1]
     
     x_in = pd.DataFrame([last_r[FEATURES]])
@@ -268,26 +274,44 @@ for sym in WATCHLIST:
     rsi_v = float(last_r['rsi'])
     vol_s = float(last_r['vol_surge'])
     atr_v = float(last_r['atr'])
+    norm_atr = float(last_r['norm_atr'])
     
-    # Logic phân bổ vốn và tín hiệu:
+    # 1. Tính toán điểm Cắt lỗ (Stop-loss) và Mục tiêu (Target) theo ATR
+    stop_dist = max(1.5 * atr_v, cur_p * 0.04) # Tối thiểu -4%
+    stop_loss = round(cur_p - stop_dist, 2)
+    risk_pct = round((stop_dist / cur_p) * 100, 1)
+    
+    target_dist = max(2.5 * atr_v, cur_p * 0.08) # Tối thiểu +8%
+    target_p = round(cur_p + target_dist, 2)
+    reward_pct = round((target_dist / cur_p) * 100, 1)
+
+    # 2. Quản trị quy mô vị thế theo rủi ro (Risk Budgeting 1.5% NAV max)
+    # Cổ phiếu biến động cao (norm_atr lớn) sẽ tự động bị giảm tỷ trọng giải ngân
+    raw_pos = (1.5 / max(risk_pct, 1.0)) * 100.0
+    safe_pos = min(max(round(raw_pos, 0), 10.0), 25.0)
+
+    # 3. Phân loại hành động HOÀN TOÀN KHÁCH QUAN THEO CHỈ SỐ (Không thiên vị mã nào)
     if CIRCUIT_BREAKER_ACTIVE:
         action = "🔴 CẦU DAO NGẮT: ĐỨNG NGOÀI"
-        pos_size = 0.0 # 0% NAV
-    elif rsi_v < 30:
-        action = "🟢 CANH MUA NHỊP HỒI"
-        pos_size = 25.0
-    elif vol_s >= 2.0 and score >= 35:
-        action = "🟢 NỔ VOL MUA THĂM DÒ"
-        pos_size = 20.0
-    elif score >= 55 or sym in ['FPT', 'SSI', 'VCB', 'HPG', 'VTP']:
+        pos_size = 0.0
+    elif score >= 60 and vol_s >= 1.4:
+        action = "🟢 BÙNG NỔ DÒNG TIỀN"
+        pos_size = safe_pos
+    elif score >= 52:
         action = "🟢 MUA TÍCH LŨY"
-        pos_size = 20.0
-    elif score >= 30 or sym in ['GEX', 'VIX', 'VIC', 'VRE', 'TCB', 'MBB', 'MWG', 'GAS', 'PLX']:
-        action = "🟡 XEM XÉT THÊM"
-        pos_size = 10.0
+        pos_size = safe_pos
+    elif rsi_v < 32 and score >= 35:
+        action = "🟢 BẮT ĐÁY QUÁ BÁN"
+        pos_size = round(safe_pos * 0.8, 1)
+    elif vol_s >= 1.8 and score >= 35:
+        action = "🟢 NỔ VOL THĂM DÒ"
+        pos_size = round(safe_pos * 0.6, 1)
+    elif score >= 35:
+        action = "🟡 THEO DÕI QUAN SÁT"
+        pos_size = round(safe_pos * 0.4, 1)
     else:
         action = "🔴 ĐỨNG NGOÀI / KHÔNG MUA"
-        pos_size = 0.0 # 0% NAV
+        pos_size = 0.0
         
     radar_list.append({
         'symbol': sym,
@@ -298,40 +322,21 @@ for sym in WATCHLIST:
         'action': action,
         'pos_size_pct': pos_size,
         'atr': round(atr_v, 2),
-        'entry_min': round(cur_p * 0.995, 2),
-        'entry_max': round(cur_p * 1.005, 2),
-        'target': round(cur_p + 3.0 * atr_v, 2),
-        'stop_loss': round(cur_p - 1.5 * atr_v, 2),
-        'reward_pct': round(((3.0 * atr_v) / cur_p) * 100, 1),
-        'risk_pct': round(((1.5 * atr_v) / cur_p) * 100, 1)
+        'entry_min': round(cur_p * 0.992, 2),
+        'entry_max': round(cur_p * 1.008, 2),
+        'target': target_p,
+        'stop_loss': stop_loss,
+        'reward_pct': reward_pct,
+        'risk_pct': risk_pct
     })
 
-# Đảm bảo ACV luôn có trong radar_list với đánh giá chuẩn theo thị trường
-if not any(x['symbol'] == 'ACV' for x in radar_list):
-    radar_list.append({
-        'symbol': 'ACV',
-        'price': 39.3,
-        'score': 55,
-        'rsi': 41.2,
-        'vol_surge': 0.71,
-        'action': '🟡 QUAN SÁT TÍCH LŨY',
-        'pos_size_pct': 10.0,
-        'atr': 1.1,
-        'entry_min': 38.5,
-        'entry_max': 39.5,
-        'target': 42.5,
-        'stop_loss': 36.5,
-        'reward_pct': 8.1,
-        'risk_pct': 7.1
-    })
-
-# Sắp xếp xếp hạng thuần túy theo điểm số định lượng AI cao nhất thị trường (không ưu ái bất kỳ mã nào)
+# Sắp xếp thuần túy theo điểm số định lượng AI cao nhất
 radar_list.sort(key=lambda x: x['score'], reverse=True)
 top3 = radar_list[:3]
 
-# Đóng gói JSON gửi tới Vercel & KwangTae Quant Terminal
+# Đóng gói JSON
 output_payload = {
-    'updated_at': latest_t.strftime('%Y-%m-%d %H:%M'),
+    'updated_at': str(latest_date) + " 15:35",
     'vibe_score': round(cur_vibe, 1),
     'vibe_status': vibe_status,
     'market_breadth': round(cur_breadth, 1),
@@ -348,20 +353,20 @@ with open('public/kwangtae_radar.json', 'w', encoding='utf-8') as f:
 
 print("\n" + "="*85)
 print(f"🎉 [HOÀN TẤT CHU TRÌNH MLOPS] Đã lưu kết quả tại public/kwangtae_radar.json!")
-print(f"• Trạng thái mô hình : {'ĐÃ CẤP PHÉP TRIỂN KHAI (PROD)' if MODEL_APPROVED else 'ĐÃ HOÀN TÁC (ROLLBACK)'}")
+print(f"• Trạng thái mô hình  : {'ĐÃ CẤP PHÉP TRIỂN KHAI (PROD)' if MODEL_APPROVED else 'ĐÃ HOÀN TÁC (ROLLBACK)'}")
 print(f"• Cầu dao Thiên Nga Đen: {'KÍCH HOẠT (BẢO VỆ VỐN)' if CIRCUIT_BREAKER_ACTIVE else 'AN TOÀN BÌNH THƯỜNG'}")
-print(f"• Top 1 cơ hội hôm nay : {top3[0]['symbol']} (Điểm: {top3[0]['score']}/100, Tỷ trọng gợi ý: {top3[0]['pos_size_pct']}%)")
+if top3:
+    print(f"• Top 1 cơ hội hôm nay  : {top3[0]['symbol']} (Điểm: {top3[0]['score']}/100, Tỷ trọng: {top3[0]['pos_size_pct']}%)")
 print("="*85)
 
-# =============================================================================
-# BẮN THÔNG BÁO TỰ ĐỘNG ĐẾN TELEGRAM CỦA ANH QUANG THẾ (17:00 BÁO CÁO TỔNG KẾT)
-# =============================================================================
+# BẮN THÔNG BÁO TỰ ĐỘNG ĐẾN TELEGRAM
 try:
     import sys
     sys.path.append(os.path.dirname(__file__))
     import send_daily_17h_report
     msg = send_daily_17h_report.generate_daily_report()
-    send_daily_17h_report.send_telegram(msg)
-    print("📲 [TELEGRAM] Đã gửi báo cáo tổng kết 17h tự động đến điện thoại của anh Quang Thế!")
+    sent = send_daily_17h_report.send_telegram(msg)
+    if sent:
+        print("📲 [TELEGRAM] Đã gửi báo cáo tổng kết tự động thành công!")
 except Exception as tg_err:
-    print(f"⚠️ Lỗi gửi Telegram qua send_daily_17h_report: {tg_err}")
+    print(f"⚠️ Thông báo Telegram: {tg_err}")
