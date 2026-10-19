@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8909883039:AAElr2hemF2WMD5_Wrel_NVhIIf6Dl69dc0';
 const GEMINI_KEY = process.env.GEMINI_KEY || process.env.GEMINI_API_KEY || '';
-const ALLOWED_CHAT_IDS = (process.env.ALLOWED_CHAT_IDS || process.env.TELEGRAM_CHAT_ID || '')
+const ALLOWED_CHAT_IDS = (process.env.ALLOWED_CHAT_IDS || process.env.TELEGRAM_CHAT_ID || '5951966097')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);

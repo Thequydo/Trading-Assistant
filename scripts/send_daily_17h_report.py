@@ -5,8 +5,8 @@ import urllib.request
 import urllib.parse
 from datetime import datetime
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8909883039:AAElr2hemF2WMD5_Wrel_NVhIIf6Dl69dc0").strip()
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "5951966097").strip()
 
 def get_vnindex():
     """Lấy dữ liệu chỉ số VN-INDEX đóng cửa hôm nay (ưu tiên VPS, dự phòng Entrade)"""

@@ -1,6 +1,6 @@
 // api/vnindex-alert.js - Serverless Monitor for VN-INDEX (+/- 15 Points Telegram Alert)
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const DEFAULT_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8909883039:AAElr2hemF2WMD5_Wrel_NVhIIf6Dl69dc0';
+const DEFAULT_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '5951966097';
 
 let lastAlertState = null;
 let lastAlertTimestamp = 0;
