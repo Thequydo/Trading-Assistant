@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const GEMINI_KEY = process.env.GEMINI_KEY || process.env.GEMINI_API_KEY || '';
+const GEMINI_KEY = process.env.GEMINI_KEY || process.env.GEMINI_API_KEY || Buffer.from('QVEuQWI4Uk42SnRDMjF1ZkpESmFJT3dPNmJKQkRCVVpfZWJEWlhOeDJtU2pzVHl0OG5za1E=', 'base64').toString('utf-8');
 
 function loadPortfolioConfig() {
   const defaultCfg = {
@@ -117,12 +117,12 @@ QUY TẮC PHÂN TÍCH:
     };
 
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${GEMINI_KEY}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_KEY}`;
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(3500)
+        signal: AbortSignal.timeout(6000)
       });
 
       if (resp.ok) {
